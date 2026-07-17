@@ -1,66 +1,119 @@
 pipeline {
     agent any
 
-    environment {
-        DOCKER_HUB_USER = 'your-dockerhub-username'
-        IMAGE_NAME      = 'react-swarm-app'
-        STACK_NAME      = 'react-stack'
-        REGISTRY_CRED   = 'docker-hub-credentials'
+    // Automated cron trigger running every 5 minutes
+    triggers {
+        cron('H/5 * * * *')
     }
 
-    triggers {
-        pollSCM('H/15 * * * *')
-        
+    environment {
+        IMAGE_NAME     = 'react-cicd-app'
+        CONTAINER_NAME = 'react-app-prod'
+        HOST_PORT      = '8080'
     }
 
     stages {
-        stage('Checkout Code') {
+        stage('Checkout Source') {
             steps {
-                checkout scm
+                // Checkout code from main branch
+                git branch: 'main', url: 'pipeline {
+    agent any
+
+    // Automated cron trigger running every 5 minutes
+    triggers {
+        cron('H/5 * * * *')
+    }
+
+    environment {
+        IMAGE_NAME     = 'react-cicd-app'
+        CONTAINER_NAME = 'react-app-prod'
+        HOST_PORT      = '8080'
+    }
+
+    stages {
+        stage('Checkout Source') {
+            steps {
+                // Checkout code from main branch
+                git branch: 'main', url: 'https://github.com/indra69-spec/react'
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                script {
-                    sh "docker build -t ${DOCKER_HUB_USER}/${IMAGE_NAME}:latest ."
-                    sh "docker build -t ${DOCKER_HUB_USER}/${IMAGE_NAME}:${BUILD_NUMBER} ."
-                }
+                sh "docker build -t ${IMAGE_NAME}:latest ."
             }
         }
 
-        stage('Push Image to Registry') {
+        stage('Clean Old Container') {
             steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: "${REGISTRY_CRED}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh "echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin"
-                        sh "docker push ${DOCKER_HUB_USER}/${IMAGE_NAME}:latest"
-                        sh "docker push ${DOCKER_HUB_USER}/${IMAGE_NAME}:${BUILD_NUMBER}"
-                    }
-                }
+                sh '''
+                    if [ $(docker ps -a -q -f name=${CONTAINER_NAME}) ]; then
+                        echo "Stopping and removing existing container..."
+                        docker stop ${CONTAINER_NAME} || true
+                        docker rm ${CONTAINER_NAME} || true
+                    fi
+                '''
             }
         }
 
-        stage('Deploy to Docker Swarm') {
+        stage('Deploy Application Container') {
             steps {
-                script {
-
-                    sh "DOCKER_HUB_USER=${DOCKER_HUB_USER} docker stack deploy -c docker-compose.yml ${STACK_NAME} --with-registry-auth"
-                }
+                sh "docker run -d --name ${CONTAINER_NAME} -p ${HOST_PORT}:80 ${IMAGE_NAME}:latest"
             }
         }
     }
 
     post {
         always {
-
-            sh "docker image prune -f"
+            // Remove dangling image layers to conserve disk space
+            sh 'docker image prune -f'
         }
         success {
-            echo "Deployment to Docker Swarm completed successfully!"
+            echo "Pipeline run completed successfully! App live at http://localhost:${HOST_PORT}"
         }
         failure {
-            echo "Pipeline failed. Please check build logs."
+            echo "Pipeline failed! Check console output for details."
+        }
+    }
+}'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh "docker build -t ${IMAGE_NAME}:latest ."
+            }
+        }
+
+        stage('Clean Old Container') {
+            steps {
+                sh '''
+                    if [ $(docker ps -a -q -f name=${CONTAINER_NAME}) ]; then
+                        echo "Stopping and removing existing container..."
+                        docker stop ${CONTAINER_NAME} || true
+                        docker rm ${CONTAINER_NAME} || true
+                    fi
+                '''
+            }
+        }
+
+        stage('Deploy Application Container') {
+            steps {
+                sh "docker run -d --name ${CONTAINER_NAME} -p ${HOST_PORT}:80 ${IMAGE_NAME}:latest"
+            }
+        }
+    }
+
+    post {
+        always {
+            // Remove dangling image layers to conserve disk space
+            sh 'docker image prune -f'
+        }
+        success {
+            echo "Pipeline run completed successfully! App live at http://localhost:${HOST_PORT}"
+        }
+        failure {
+            echo "Pipeline failed! Check console output for details."
         }
     }
 }
